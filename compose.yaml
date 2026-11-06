@@ -1,0 +1,37 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: framelab
+      POSTGRES_USER: framelab
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+    volumes: ["database:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U framelab"]
+      interval: 5s
+      retries: 20
+  api:
+    build: .
+    environment: &settings
+      ASPNETCORE_ENVIRONMENT: Production
+      DatabaseProvider: Postgres
+      ConnectionStrings__Default: Host=db;Database=framelab;Username=framelab;Password=${DB_PASSWORD}
+      AdminPassword: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
+      PublicOrigin: http://localhost:9260
+    volumes: ["media:/data"]
+    depends_on:
+      db: { condition: service_healthy }
+  worker:
+    build: .
+    entrypoint: ["dotnet", "worker/FrameLab.Worker.dll"]
+    environment: *settings
+    volumes: ["media:/data"]
+    depends_on: [api]
+    restart: unless-stopped
+  web:
+    build: { context: ., dockerfile: web/Dockerfile }
+    ports: ["127.0.0.1:9260:80"]
+    depends_on: [api]
+volumes:
+  database:
+  media:
