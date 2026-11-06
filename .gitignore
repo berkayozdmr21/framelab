@@ -1,0 +1,11 @@
+.runtime/
+.tools/
+**/bin/
+**/obj/
+node_modules/
+dist/
+.env
+*.db*
+
+test-results/
+playwright-report/
