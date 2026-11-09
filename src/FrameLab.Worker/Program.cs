@@ -48,6 +48,7 @@ async Task<Job?> Claim()
             );
         return null;
     }
+    var leaseUntil = DateTime.UtcNow.AddSeconds(20).Ticks;
     var count = await db
         .Jobs.Where(j =>
             j.Id == candidate.Id
@@ -56,7 +57,7 @@ async Task<Job?> Claim()
         .ExecuteUpdateAsync(s =>
             s.SetProperty(j => j.State, "running")
                 .SetProperty(j => j.LeaseOwner, owner)
-                .SetProperty(j => j.LeaseUntil, DateTime.UtcNow.AddSeconds(20).Ticks)
+                .SetProperty(j => j.LeaseUntil, leaseUntil)
                 .SetProperty(j => j.Progress, 0)
                 .SetProperty(j => j.Stage, "Başlıyor")
                 .SetProperty(j => j.Attempt, j => j.Attempt + 1)
@@ -99,15 +100,17 @@ async Task Work(Job job)
                     p = progress;
                     s = stage;
                 }
+                var now = DateTime.UtcNow.Ticks;
+                var renewedUntil = DateTime.UtcNow.AddSeconds(20).Ticks;
                 var count = await db
                     .Jobs.Where(j =>
                         j.Id == job.Id
                         && j.LeaseOwner == owner
                         && j.State == "running"
-                        && j.LeaseUntil > DateTime.UtcNow.Ticks
+                        && j.LeaseUntil > now
                     )
                     .ExecuteUpdateAsync(v =>
-                        v.SetProperty(j => j.LeaseUntil, DateTime.UtcNow.AddSeconds(20).Ticks)
+                        v.SetProperty(j => j.LeaseUntil, renewedUntil)
                             .SetProperty(j => j.Progress, p)
                             .SetProperty(j => j.Stage, s)
                     );
@@ -220,12 +223,13 @@ async Task Work(Job job)
             throw new InvalidOperationException("Bilinmeyen iş türü.");
         cancel.Token.ThrowIfCancellationRequested();
         await using var tx = await db.Database.BeginTransactionAsync();
+        var completedAt = DateTime.UtcNow.Ticks;
         var updated = await db
             .Jobs.Where(j =>
                 j.Id == job.Id
                 && j.LeaseOwner == owner
                 && j.State == "running"
-                && j.LeaseUntil > DateTime.UtcNow.Ticks
+                && j.LeaseUntil > completedAt
             )
             .ExecuteUpdateAsync(s =>
                 s.SetProperty(j => j.State, "completed")
@@ -244,11 +248,12 @@ async Task Work(Job job)
         Console.Error.WriteLine($"Job {job.Id}: {e.Message}");
         await using var db = FrameDb.Open(config);
         var cancelled = e is OperationCanceledException;
+        var failedAt = DateTime.UtcNow.Ticks;
         var changed = await db
             .Jobs.Where(j =>
                 j.Id == job.Id
                 && j.LeaseOwner == owner
-                && j.LeaseUntil > DateTime.UtcNow.Ticks
+                && j.LeaseUntil > failedAt
                 && (j.State == "running" || j.State == "cancel_requested")
             )
             .ExecuteUpdateAsync(s =>

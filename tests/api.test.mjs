@@ -222,3 +222,74 @@ test("resumable upload verifies duplicate chunks and rejects corrupted bodies", 
   });
   await request("/uploads/" + bad.id + "/complete", "POST", undefined, 422);
 });
+
+import { execFileSync } from "node:child_process";
+test("audio music mix, cancellation and retry produce a playable output", async () => {
+  const list = await request("/projects");
+  const p = list.find((p) => p.name === "Portrait");
+  assert.ok(p);
+  execFileSync(process.env.FFmpegPath || "ffmpeg", [
+    "-y",
+    "-v",
+    "error",
+    "-f",
+    "lavfi",
+    "-i",
+    "sine=frequency=440:duration=2",
+    "-c:a",
+    "pcm_s16le",
+    ".runtime/test-results/music.wav",
+  ]);
+  const bytes = await readFile(".runtime/test-results/music.wav");
+  const upload = await request("/projects/" + p.id + "/uploads", "POST", {
+    name: "music.wav",
+    total: bytes.length,
+    hash: createHash("sha256").update(bytes).digest("hex"),
+    key: crypto.randomUUID(),
+  });
+  const part = await fetch(base + "/api/uploads/" + upload.id + "?offset=0", {
+    method: "PUT",
+    headers: { Authorization: "Bearer " + token },
+    body: bytes,
+  });
+  assert.equal(part.status, 200);
+  const asset = await request("/uploads/" + upload.id + "/complete", "POST");
+  let b = await request("/projects/" + p.id);
+  await waitJob(
+    b.jobs.find((j) => j.kind === "ingest" && j.state !== "completed").id,
+  );
+  b = await request("/projects/" + p.id);
+  assert.equal(b.assets.find((a) => a.id === asset.assetId).kind, "audio");
+  assert.ok(b.assets.find((a) => a.id === asset.assetId).wave);
+  const doc = structuredClone(b.project.document);
+  doc.format = "landscape";
+  doc.musicId = asset.assetId;
+  doc.clips = Array.from({ length: 4 }, () => ({
+    ...doc.clips[0],
+    id: crypto.randomUUID(),
+    out: 3,
+  }));
+  await request("/projects/" + p.id, "PUT", {
+    name: "Music mix",
+    revision: b.project.revision,
+    document: doc,
+  });
+  b = await request("/projects/" + p.id);
+  const j = await request("/projects/" + p.id + "/renders", "POST", {
+    key: crypto.randomUUID(),
+    revision: b.project.revision,
+    preset: "720p",
+  });
+  await request("/jobs/" + j.id + "/cancel", "POST", undefined, 204);
+  let cancelled;
+  for (let i = 0; i < 40; i++) {
+    cancelled = await request("/jobs/" + j.id);
+    if (cancelled.state === "cancelled") break;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  assert.equal(cancelled.state, "cancelled");
+  const retry = await request("/jobs/" + j.id + "/retry", "POST");
+  assert.notEqual(retry.id, j.id);
+  await waitJob(retry.id);
+  console.log("Verified music mix, waveform, cancellation and retry");
+});

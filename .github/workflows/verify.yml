@@ -10,6 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
+      fail-fast: false
       matrix:
         database: [SQLite, Postgres]
     services:
@@ -60,7 +61,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: diagnostic-logs
+          name: diagnostic-logs-${{ matrix.database }}
           path: |
             .runtime/logs
             test-results
