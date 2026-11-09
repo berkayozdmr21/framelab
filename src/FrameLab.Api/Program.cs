@@ -341,6 +341,7 @@ object JobView(Job j) =>
     {
         j.Id,
         j.Kind,
+        assetId = j.Kind == "ingest" ? j.Payload : null,
         j.State,
         j.Progress,
         j.Stage,

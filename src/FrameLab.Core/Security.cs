@@ -42,9 +42,10 @@ public static class Security
         if (string.IsNullOrEmpty(token))
             throw new Fault(401, "Oturum açın.");
         var hash = Hash(token);
+        var now = DateTime.UtcNow.Ticks;
         var session =
             await db.Sessions.SingleOrDefaultAsync(s =>
-                s.Id == hash && s.Until > DateTime.UtcNow.Ticks
+                s.Id == hash && s.Until > now
             ) ?? throw new Fault(401, "Oturum süresi doldu.");
         return await db.Accounts.SingleAsync(a => a.Id == session.AccountId);
     }
